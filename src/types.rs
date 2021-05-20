@@ -1,6 +1,12 @@
 use std::collections::HashMap;
 
 #[derive(Debug, PartialEq, Clone, Copy)]
+pub struct Msg {
+    pub user_id: u8,
+    pub user_msg: String,
+}
+
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub enum Status {
     LIVED,
     KILLED,
