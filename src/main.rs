@@ -2,26 +2,28 @@
 
 use std::thread;
 use tokio;
-use std::sync::mpsc::{Sender, Receiver};
-use std::sync::mpsc;
+use crossbeam_channel::Sender;
+use crossbeam_channel::Receiver;
 use crate::types::Msg;
+use lazy_static::lazy_static;
+use crossbeam_channel::unbounded;
 
 mod util;
 mod types; 
 mod actions;
 mod websockets_chat;
- 
+
+lazy_static!{
+    pub static ref WEB:(Sender<Msg>, Receiver<Msg>) = unbounded();
+    pub static ref BACK:(Sender<Msg>, Receiver<Msg>) = unbounded();
+}
+
 #[tokio::main]
 async fn main() {
 
-    let (web_tx, web_rx): (Sender<Msg>, Receiver<Msg>) = mpsc::channel();
-    let (back_tx, back_rx):(Sender<Msg>, Receiver<Msg>) = mpsc::channel(); //logic
-
-
-
     tokio::spawn(async {
-        websockets_chat::websocket_init(back_tx.clone(), web_rx.clone()).await;
-    });  
+        websockets_chat::websocket_init().await;
+    });
     loop {}
 }
 
