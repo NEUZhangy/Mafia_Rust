@@ -14,40 +14,37 @@ use std::sync::mpsc::{Sender, Receiver};
 use crate::types::Msg;
 use std::sync::atomic::AtomicU8;
 use state::Storage;
-use crate::WEB;
+use crate::BACK;
+use lazy_static::lazy_static;
+
 
 /// Our global unique user id counter.
 static NEXT_USER_ID: AtomicU8 = AtomicU8::new(1);
-static USERS:Storage<HashMap<u8, mpsc::UnboundedSender<Result<Message, warp::Error>>>> = Storage::new();
+type Users = Arc<RwLock<HashMap<u8, mpsc::UnboundedSender<Result<Message, warp::Error>>>>>;
+
+lazy_static!{
+    pub static ref USERS:Users = Users::default();
+}
 /// Our state of currently connected users.
 ///
 /// - Key is their id
 /// - Value is a sender of `warp::ws::Message`
-type Users = Arc<RwLock<HashMap<u8, mpsc::UnboundedSender<Result<Message, warp::Error>>>>>;
 
 pub async fn websocket_init() {
     // pretty_env_logger::init();
 
     // Keep track of all connected users, key is usize, value
     // is a websocket sender.
-    let users = Users::default();
     // Turn our "state" into a new Filter...
-    let users = warp::any().map(move || users.clone());
 
     // GET /chat -> websocket upgrade
     let chat = warp::path("chat")
         // The `ws()` filter will prepare Websocket handshake...
         .and(warp::ws())
-        .and(users)
-        .map(|ws: warp::ws::Ws, users| {
+        .map(|ws: warp::ws::Ws| {
             // This will call our function if the handshake succeeds.
-            ws.on_upgrade(move |socket| user_connected(socket, users))
+            ws.on_upgrade(move |socket| user_connected(socket))
         });
-
-    tokio::spawn(async{
-        println!("start the send");
-        back_send_message().await;
-    });
 
     // GET / -> index html
     let index = warp::path::end().map(|| warp::reply::html(INDEX_HTML));
@@ -63,7 +60,7 @@ pub async fn websocket_init() {
     // });
 }
 
-async fn user_connected(ws: WebSocket, users: Users) {
+async fn user_connected(ws: WebSocket) {
     // Use a counter to assign a new unique ID for this user.
     let my_id = NEXT_USER_ID.fetch_add(1, Ordering::Relaxed);
     eprintln!("new chat user: {}", my_id);
@@ -83,19 +80,13 @@ async fn user_connected(ws: WebSocket, users: Users) {
     }));
 
     // Save the sender in our list of connected users.
-    users.write().await.insert(my_id, tx);
-
-    {
-        let users_tmp = users.read().await;
-        USERS.set(users_tmp.clone());
-        println!( "{:?}", USERS.get());
-    }
+    USERS.write().await.insert(my_id, tx);
 
     // Return a `Future` that is basically a state machine managing
     // this specific user's connection.
 
     // Make an extra clone to give to our disconnection handler...
-    let users2 = users.clone();
+    let users2 = USERS.clone();
 
     // Every time the user sends a message, broadcast it to
     // all other users...
@@ -107,7 +98,15 @@ async fn user_connected(ws: WebSocket, users: Users) {
                 break;
             }
         };
-        user_message(my_id, msg, &users).await;
+
+        let send_msg = match msg.to_str(){
+            Ok(send_msg) => send_msg,
+            Err(e) => ""
+        };
+
+        BACK.0.send( Msg{user_id:my_id, user_msg: send_msg.to_string()});
+
+        user_message(my_id, msg, &USERS).await;
     }
 
     // user_ws_rx stream will keep processing as long as the user stays
@@ -144,19 +143,12 @@ async fn user_disconnected(my_id: u8, users: &Users) {
     users.write().await.remove(&my_id);
 }
 
-async fn back_send_message(){
+pub async fn back_send_message(msg:Msg){
     //listen to logic, when receive msg, send to user
-    println!("aaaa");
-    loop{
-        println!("aaaaaaaaaaaa");
-        if let Ok(msg) = WEB.1.recv() {
-            println!("{:?}",msg);
-            USERS.get().get(&msg.user_id).map(|tx| {
-                if let Err(_disconnected) = tx.send(Ok(Message::text(msg.user_msg))) {
-                }
-            });
+    USERS.read().await.get(&msg.user_id).map(|tx| {
+        if let Err(_disconnected) = tx.send(Ok(Message::text(msg.user_msg.clone()))) {
         }
-    }
+    });
 
 }
 
@@ -189,6 +181,7 @@ static INDEX_HTML: &str = r#"<!DOCTYPE html>
         };
 
         ws.onmessage = function(msg) {
+            console.log(msg);
             message(msg.data);
         };
 
@@ -216,7 +209,9 @@ async fn websocket_init_test() {
 
     println!("start 10 sec");
     std::thread::sleep(std::time::Duration::from_secs(10));
-    WEB.0.send(Msg{user_id:1, user_msg:"ssss".to_string()}).unwrap();
+    USERS.read().await.get(&1).unwrap().send(Ok(Message::text("getString")));
+    println!("{:?}", BACK.1.recv());
     println!("end 10 sec");
+    loop{}
 }
 
