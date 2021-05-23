@@ -105,8 +105,6 @@ async fn user_connected(ws: WebSocket) {
         };
 
         BACK.0.send( Msg{user_id:my_id, user_msg: send_msg.to_string()});
-
-        user_message(my_id, msg, &USERS).await;
     }
 
     // user_ws_rx stream will keep processing as long as the user stays

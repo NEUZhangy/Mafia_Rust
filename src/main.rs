@@ -14,6 +14,7 @@ mod util;
 mod types; 
 mod actions;
 mod websockets_chat;
+mod game;
 
 lazy_static!{
     pub static ref WEB:(Sender<Msg>, Receiver<Msg>) = unbounded();

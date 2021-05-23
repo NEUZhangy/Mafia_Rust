@@ -28,6 +28,15 @@ impl Game {
         None
     }
 
+    pub fn get_seer(&self) -> Option<&Player>{
+        for(key, player) in self.players.iter() {
+            if player.role == Role::Seer {
+                return Some(player);
+            }
+        }
+        None
+    }
+
     pub fn player_status_change(&mut self, p_num:u8, status: Status) {
         if let Some(player) =  self.players.get_mut(&p_num) {
             player.status = status;
@@ -54,6 +63,15 @@ impl Game {
            }
         }
         self.player_status_change(p_num, status);
+    }
+
+    pub fn seer_action(&mut self, p_num:u8) -> bool{
+        if let Some(player) =  self.players.get(&p_num) {
+            if player.role == Role::Wolf {
+                return true;
+            }
+        };
+        return false;
     }
 }
 
