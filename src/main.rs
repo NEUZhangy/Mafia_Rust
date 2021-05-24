@@ -27,7 +27,7 @@ async fn main() {
     tokio::spawn(async{
         websocket_init().await;
     });
-    init_game();
+    init_game().await;
     loop{}
 }
 
