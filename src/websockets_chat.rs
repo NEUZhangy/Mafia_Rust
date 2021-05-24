@@ -51,7 +51,7 @@ pub async fn websocket_init() {
 
     let routes = index.or(chat);
 
-    warp::serve(routes).run(([127, 0, 0, 1], 3030)).await;
+    warp::serve(routes).run(([0, 0, 0, 0], 3030)).await;
 
     // tokio::spawn(async{
     //     while let Ok(msg) = web_rx.recv() {

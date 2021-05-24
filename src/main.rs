@@ -8,6 +8,7 @@ use crate::types::Msg;
 use lazy_static::lazy_static;
 use crossbeam_channel::unbounded;
 use crate::websockets_chat::websocket_init;
+use crate::game::init_game;
 
 
 mod util;
@@ -23,19 +24,11 @@ lazy_static!{
 
 #[tokio::main]
 async fn main() {
-
     tokio::spawn(async{
         websocket_init().await;
-        loop{}
     });
-
-
-
-    println!("start 10 sec");
-    std::thread::sleep(std::time::Duration::from_secs(10));
-    WEB.0.send(Msg{user_id:1, user_msg:"ssss".to_string()}).unwrap();
-    println!("end 10 sec");
-
+    init_game();
+    loop{}
 }
 
 
