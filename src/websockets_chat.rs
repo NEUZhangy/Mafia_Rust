@@ -1,28 +1,27 @@
 // #![deny(warnings)]
 use std::collections::HashMap;
 use std::sync::{
-    atomic::{AtomicUsize, Ordering},
     Arc,
+    atomic::Ordering,
 };
+use std::sync::atomic::AtomicU8;
 
 use futures::{FutureExt, StreamExt};
+use lazy_static::lazy_static;
 use tokio::sync::{mpsc, RwLock};
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use warp::ws::{Message, WebSocket};
 use warp::Filter;
-use std::sync::mpsc::{Sender, Receiver};
-use crate::types::Msg;
-use std::sync::atomic::AtomicU8;
-use state::Storage;
-use crate::BACK;
-use lazy_static::lazy_static;
+use warp::ws::{Message, WebSocket};
 
+use crate::BACK;
+use crate::types::Msg;
 
 /// Our global unique user id counter.
 static NEXT_USER_ID: AtomicU8 = AtomicU8::new(1);
+
 type Users = Arc<RwLock<HashMap<u8, mpsc::UnboundedSender<Result<Message, warp::Error>>>>>;
 
-lazy_static!{
+lazy_static! {
     pub static ref USERS:Users = Users::default();
 }
 /// Our state of currently connected users.
@@ -63,7 +62,7 @@ pub async fn websocket_init() {
 async fn user_connected(ws: WebSocket) {
     // Use a counter to assign a new unique ID for this user.
     let my_id = NEXT_USER_ID.fetch_add(1, Ordering::Relaxed);
-    eprintln!("new chat user: {}", my_id);
+    info!("new chat user: {}", my_id);
 
     // Split the socket into a sender and receive of messages.
     let (user_ws_tx, mut user_ws_rx) = ws.split();
@@ -75,7 +74,7 @@ async fn user_connected(ws: WebSocket) {
 
     tokio::task::spawn(rx.forward(user_ws_tx).map(|result| {
         if let Err(e) = result {
-            eprintln!("websocket send error: {}", e);
+            info!("websocket send error: {}", e);
         }
     }));
 
@@ -94,17 +93,17 @@ async fn user_connected(ws: WebSocket) {
         let msg = match result {
             Ok(msg) => msg,
             Err(e) => {
-                eprintln!("websocket error(uid={}): {}", my_id, e);
+                info!("websocket error(uid={}): {}", my_id, e);
                 break;
             }
         };
 
-        let send_msg = match msg.to_str(){
+        let send_msg = match msg.to_str() {
             Ok(send_msg) => send_msg,
             Err(e) => ""
         };
-
-        BACK.0.send( Msg{user_id:my_id, user_msg: send_msg.to_string()});
+        info!("Receive User Msg: {:?}", msg);
+        BACK.0.send(Msg { user_id: my_id, user_msg: send_msg.to_string() });
     }
 
     // user_ws_rx stream will keep processing as long as the user stays
@@ -135,19 +134,29 @@ async fn user_message(my_id: u8, msg: Message, users: &Users) {
 }
 
 async fn user_disconnected(my_id: u8, users: &Users) {
-    eprintln!("good bye user: {}", my_id);
+    info!("good bye user: {}", my_id);
 
     // Stream closed up, so remove from the user list
     users.write().await.remove(&my_id);
 }
 
-pub async fn back_send_message(msg:Msg){
+pub async fn back_send_message(msg: Msg) {
+    info!("{:?}", msg);
     //listen to logic, when receive msg, send to user
     USERS.read().await.get(&msg.user_id).map(|tx| {
-        if let Err(_disconnected) = tx.send(Ok(Message::text(msg.user_msg.clone()))) {
-        }
+        if let Err(_disconnected) = tx.send(Ok(Message::text(msg.user_msg.clone()))) {}
     });
+}
 
+pub async fn broadcast(msg: Msg) {
+    info!("Broadcast: {:?}", msg);
+    for (&uid, tx) in USERS.read().await.iter() {
+        if let Err(_disconnected) = tx.send(Ok(Message::text(msg.user_msg.clone()))) {
+            // The tx is disconnected, our `user_disconnected` code
+            // should be happening in another task, nothing more to
+            // do here.
+        }
+    }
 }
 
 static INDEX_HTML: &str = r#"<!doctype html>
@@ -185,11 +194,13 @@ static INDEX_HTML: &str = r#"<!doctype html>
     <span class="navbar-brand mb-0 h1" style="color: white; padding-left: 1rem;">狼人杀信息发送</span>
 </nav>
 
-<div id="chat">
-    <p><em>Connecting...</em></p>
+<div style="margin-left: 1em" >
+    <div id="chat" >
+        <p><em>Connecting...</em></p>
+    </div>
+    <input type="text" id="text" />
+    <button type="button" class="btn btn-primary" id="send">Send</button>
 </div>
-<input type="text" id="text" />
-<button type="button" class="btn btn-primary" id="send">Send</button>
 <script type="text/javascript">
     const chat = document.getElementById('chat');
     const text = document.getElementById('text');
@@ -223,23 +234,24 @@ static INDEX_HTML: &str = r#"<!doctype html>
 
         message('<You>: ' + msg);
     };
+
 </script>
 </body>
 
 </html>
 "#;
+
 #[tokio::test(flavor = "multi_thread")]
 async fn websocket_init_test() {
-
-    tokio::spawn(async{
+    tokio::spawn(async {
         websocket_init().await;
     });
 
-    println!("start 10 sec");
+    info!("start 10 sec");
     std::thread::sleep(std::time::Duration::from_secs(10));
     USERS.read().await.get(&1).unwrap().send(Ok(Message::text("getString")));
-    println!("{:?}", BACK.1.recv());
-    println!("end 10 sec");
-    loop{}
+    info!("{:?}", BACK.1.recv());
+    info!("end 10 sec");
+    loop {}
 }
 
