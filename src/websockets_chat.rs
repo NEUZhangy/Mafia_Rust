@@ -1,20 +1,17 @@
 // #![deny(warnings)]
 use std::collections::HashMap;
-use std::sync::{
-    Arc,
-    atomic::Ordering,
-};
 use std::sync::atomic::AtomicU8;
+use std::sync::{atomic::Ordering, Arc};
 
 use futures::{FutureExt, StreamExt};
 use lazy_static::lazy_static;
 use tokio::sync::{mpsc, RwLock};
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use warp::Filter;
 use warp::ws::{Message, WebSocket};
+use warp::Filter;
 
-use crate::BACK;
 use crate::types::Msg;
+use crate::BACK;
 
 /// Our global unique user id counter.
 static NEXT_USER_ID: AtomicU8 = AtomicU8::new(1);
@@ -22,7 +19,7 @@ static NEXT_USER_ID: AtomicU8 = AtomicU8::new(1);
 type Users = Arc<RwLock<HashMap<u8, mpsc::UnboundedSender<Result<Message, warp::Error>>>>>;
 
 lazy_static! {
-    pub static ref USERS:Users = Users::default();
+    pub static ref USERS: Users = Users::default();
 }
 /// Our state of currently connected users.
 ///
@@ -100,16 +97,37 @@ async fn user_connected(ws: WebSocket) {
 
         let send_msg = match msg.to_str() {
             Ok(send_msg) => send_msg,
-            Err(e) => ""
+            Err(e) => "",
         };
         info!("Receive User Msg: {:?}", msg);
         if send_msg.to_string().starts_with("number: ") {
             info!("here: {}", send_msg);
-            let a = send_msg.to_string().split("number: ").collect::<Vec<&str>>()[1].to_owned();
+            let a = send_msg
+                .to_string()
+                .split("number: ")
+                .collect::<Vec<&str>>()[1]
+                .to_owned();
             let id: u8 = a.parse().unwrap();
-            *USERS.write().await.get_mut(&id).unwrap() = tx.clone();
+            // if the user is reconnecting, then update the user channel
+            if let Some(value) = USERS.write().await.get_mut(&id) {
+                info!("{} is reconnecting", my_id);
+                *value = tx.clone();
+            } else {
+                // means the user is new connecting, ask to update the cookie
+                info!("new chat user: {}", my_id);
+                back_send_message(Msg {
+                    user_id: my_id,
+                    user_msg: format!("你的号码是{}", my_id),
+                })
+                .await;
+            }
         }
-        BACK.0.send(Msg { user_id: my_id, user_msg: send_msg.to_string() });
+        BACK.0
+            .send(Msg {
+                user_id: my_id,
+                user_msg: send_msg.to_string(),
+            })
+            .await;
     }
 
     // user_ws_rx stream will keep processing as long as the user stays
@@ -255,9 +273,13 @@ async fn websocket_init_test() {
 
     info!("start 10 sec");
     std::thread::sleep(std::time::Duration::from_secs(10));
-    USERS.read().await.get(&1).unwrap().send(Ok(Message::text("getString")));
+    USERS
+        .read()
+        .await
+        .get(&1)
+        .unwrap()
+        .send(Ok(Message::text("getString")));
     info!("{:?}", BACK.1.recv());
     info!("end 10 sec");
     loop {}
 }
-
