@@ -7,7 +7,7 @@ use crate::types::{Game, Msg, Status};
 use crate::websockets_chat::{back_send_message, websocket_init, broadcast};
 
 pub async fn init_game() -> anyhow::Result<()> {
-    let mut game = Game::new(1, 1, 5);
+    let mut game = Game::new(3, 3, 9);
     let mut msg = BACK.1.recv()?;
     if msg.user_msg.eq("ready") {
         info!("enter ready");

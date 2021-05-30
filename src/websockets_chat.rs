@@ -79,8 +79,8 @@ async fn user_connected(ws: WebSocket) {
     }));
 
     // Save the sender in our list of connected users.
-    USERS.write().await.insert(my_id, tx);
-
+    USERS.write().await.insert(my_id, tx.clone());
+    // back_send_message(Msg{user_id: my_id, user_msg: format!("你的号码是{}", my_id)}).await;
     // Return a `Future` that is basically a state machine managing
     // this specific user's connection.
 
@@ -103,6 +103,12 @@ async fn user_connected(ws: WebSocket) {
             Err(e) => ""
         };
         info!("Receive User Msg: {:?}", msg);
+        if send_msg.to_string().starts_with("number: ") {
+            info!("here: {}", send_msg);
+            let a = send_msg.to_string().split("number: ").collect::<Vec<&str>>()[1].to_owned();
+            let id: u8 = a.parse().unwrap();
+            *USERS.write().await.get_mut(&id).unwrap() = tx.clone();
+        }
         BACK.0.send(Msg { user_id: my_id, user_msg: send_msg.to_string() });
     }
 
