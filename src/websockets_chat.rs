@@ -58,7 +58,7 @@ pub async fn websocket_init() {
 
 async fn user_connected(ws: WebSocket) {
     // Use a counter to assign a new unique ID for this user.
-    let my_id = NEXT_USER_ID.fetch_add(1, Ordering::Relaxed);
+    let mut my_id = NEXT_USER_ID.fetch_add(1, Ordering::Relaxed);
     info!("new chat user: {}", my_id);
 
     // Split the socket into a sender and receive of messages.
@@ -77,7 +77,11 @@ async fn user_connected(ws: WebSocket) {
 
     // Save the sender in our list of connected users.
     USERS.write().await.insert(my_id, tx.clone());
-    // back_send_message(Msg{user_id: my_id, user_msg: format!("你的号码是{}", my_id)}).await;
+    back_send_message(Msg {
+        user_id: my_id,
+        user_msg: format!("你的号码是{}", my_id),
+    })
+    .await;
     // Return a `Future` that is basically a state machine managing
     // this specific user's connection.
 
@@ -107,19 +111,33 @@ async fn user_connected(ws: WebSocket) {
                 .split("number: ")
                 .collect::<Vec<&str>>()[1]
                 .to_owned();
-            let id: u8 = a.parse().unwrap();
-            // if the user is reconnecting, then update the user channel
-            if let Some(value) = USERS.write().await.get_mut(&id) {
-                info!("{} is reconnecting", my_id);
-                *value = tx.clone();
-            } else {
-                // means the user is new connecting, ask to update the cookie
-                info!("new chat user: {}", my_id);
-                back_send_message(Msg {
-                    user_id: my_id,
-                    user_msg: format!("你的号码是{}", my_id),
-                })
-                .await;
+            if let Ok(user_sent_id) = a.parse::<u8>() {
+                let is_contains = USERS.read().await.contains_key(&user_sent_id);
+                // if the user is reconnecting, then update the user channel
+                if is_contains {
+                    info!("{} is reconnecting", my_id);
+                    USERS
+                        .write()
+                        .await
+                        .get_mut(&user_sent_id)
+                        .replace(&mut tx.clone());
+                    info!("update user_id from {} to {}", my_id, user_sent_id);
+                    my_id = user_sent_id;
+                } else {
+                    // means the user is new connecting, ask to update the cookie
+                    info!("ask client to update cookie: {}", my_id);
+                    back_send_message(Msg {
+                        user_id: my_id,
+                        user_msg: "clean".to_string(),
+                    })
+                    .await;
+                    info!("resend the number to client: {}", my_id);
+                    back_send_message(Msg {
+                        user_id: my_id,
+                        user_msg: format!("你的号码是{}", my_id),
+                    })
+                    .await;
+                }
             }
         }
         BACK.0.send(Msg {
@@ -156,14 +174,15 @@ async fn user_message(my_id: u8, msg: Message, users: &Users) {
 }
 
 async fn user_disconnected(my_id: u8, users: &Users) {
-    info!("good bye user: {}", my_id);
+    info!("user: {} disconnected", my_id);
 
     // Stream closed up, so remove from the user list
-    users.write().await.remove(&my_id);
+    // no need to remove, so that when user reconnecting, we can get the numbers
+    // users.write().await.remove(&my_id);
 }
 
 pub async fn back_send_message(msg: Msg) {
-    info!("{:?}", msg);
+    info!("send msg: {:?}", msg);
     //listen to logic, when receive msg, send to user
     USERS.read().await.get(&msg.user_id).map(|tx| {
         if let Err(_disconnected) = tx.send(Ok(Message::text(msg.user_msg.clone()))) {}
